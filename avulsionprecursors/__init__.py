@@ -1,0 +1,1 @@
+"""Avulsion precursor analysis package."""

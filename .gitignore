@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# GIS locks / sidecars
+*.sr.lock
+*.shp.xml
+
+# Local secrets
+.env
+credentials.json
+
+# User rasters, research data, and generated outputs (keep on disk; do not publish)
+data/
+inputs/
+outputs/
+local/
+cross_section_profiles/
+*.tif
+*.tiff
+*.vrt
+*.nc
+*.laz
+*.las
+*.img
+*.asc
+
+# Generated shapefiles at the repo root (Nooksack working copies)
+/cross_sections.*
+/centerline_points_from_xs.*
+/centerline_smoothed_for_azimuth.*
+
+# Keep tiny example / test fixtures
+!examples/**
+!examples/**/*.tif
+!tests/data/**
+!tests/data/**/*.tif
