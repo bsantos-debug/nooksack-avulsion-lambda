@@ -13,7 +13,7 @@ from ..gui.labeler import CrossSectionLabeler
 
 
 def _label_file_has_labels(path: Path, required: Sequence[str]) -> bool:
-    """True if the CSV exists and contains every requested label."""
+    """True if the CSV has channel and at least one complete ridge+floodplain bank."""
     if not path.exists() or path.stat().st_size == 0:
         return False
     try:
@@ -23,7 +23,14 @@ def _label_file_has_labels(path: Path, required: Sequence[str]) -> bool:
     if df.empty or "label" not in df.columns:
         return False
     have = set(df["label"].astype(str))
-    return all(lab in have for lab in required)
+    if "channel" in required and "channel" not in have:
+        return False
+    wants_ridges = any(lab.startswith("ridge") for lab in required)
+    if not wants_ridges:
+        return all(lab in have for lab in required)
+    bank1 = "ridge1" in have and "floodplain1" in have
+    bank2 = "ridge2" in have and "floodplain2" in have
+    return bank1 or bank2
 
 
 def _existing_pick_distances(path: Path) -> Optional[dict]:
@@ -54,19 +61,38 @@ class FileLabelingPipeline:
         profiles_dir: Path,
         river_name: str,
         output_dir: Optional[Path] = None,
+        labels_dir: Optional[Path] = None,
         gui_config: Optional[GUIConfig] = None,
         dem_path: Optional[Path] = None,
         show_satellite: bool = True,
         show_dem: bool = True,
+        overlay_path: Optional[Path] = None,
+        levee_gdf: Optional[gpd.GeoDataFrame] = None,
+        overlay_existing_picks: bool = True,
+        levee_buffer_m: Optional[float] = None,
     ):
         self.cross_sections_path = Path(cross_sections_path)
         self.profiles_dir = Path(profiles_dir)
         self.river_name = river_name
         self.output_dir = Path(output_dir) if output_dir else Path("data")
+        self.labels_dir = Path(labels_dir) if labels_dir else self.output_dir / "labels"
         self.gui_config = gui_config or GUIConfig()
         self.dem_path = Path(dem_path) if dem_path else None
         self.show_satellite = show_satellite
         self.show_dem = show_dem
+        self.overlay_existing_picks = overlay_existing_picks
+        if levee_buffer_m is not None:
+            self.gui_config.levee_buffer_m = float(levee_buffer_m)
+
+        self.levee_gdf = levee_gdf
+        if self.levee_gdf is None and overlay_path is not None:
+            overlay = Path(overlay_path)
+            if not overlay.exists():
+                raise FileNotFoundError(f"Levee overlay not found: {overlay}")
+            self.levee_gdf = gpd.read_file(overlay)
+            print(
+                f"🗺️  Levee overlay: {len(self.levee_gdf)} features from {overlay}"
+            )
 
         if not self.cross_sections_path.exists():
             raise FileNotFoundError(f"Cross-section file not found: {self.cross_sections_path}")
@@ -81,8 +107,14 @@ class FileLabelingPipeline:
         self,
         node_ids: Optional[Sequence[int]] = None,
         skip_existing: bool = True,
+        overlay_existing_picks: Optional[bool] = None,
     ) -> None:
         """Launch the labeling tool for each cross-section."""
+        show_old = (
+            self.overlay_existing_picks
+            if overlay_existing_picks is None
+            else overlay_existing_picks
+        )
         selection = self._filter_cross_sections(node_ids)
         required = list(self.gui_config.labels)
         pending = []
@@ -122,9 +154,10 @@ class FileLabelingPipeline:
                 show_satellite=self.show_satellite,
                 show_dem=self.show_dem,
                 node_id=node_id,
+                levee_gdf=self.levee_gdf,
             )
 
-            predicted = _existing_pick_distances(output_file)
+            predicted = _existing_pick_distances(output_file) if show_old else None
             print(f"\nLabeling cross-section for node {node_id}")
             labeler.label_cross_section(profile_gdf, predicted_points=predicted)
 
@@ -151,13 +184,15 @@ class FileLabelingPipeline:
         )
 
     def _label_output_path(self, node_id: int) -> Path:
-        return self.output_dir / "labels" / f"{self.river_name}_node_{node_id}_labels.csv"
+        return self.labels_dir / f"{self.river_name}_node_{node_id}_labels.csv"
 
     def _load_profile(self, line: LineString, profile_path: Path, node_id: int) -> gpd.GeoDataFrame:
         df = pd.read_csv(profile_path)
-        if "distance_m" not in df.columns or "elevation_m" not in df.columns:
+        dist_col = "distance" if "distance" in df.columns else "distance_m"
+        elev_col = "elevation" if "elevation" in df.columns else "elevation_m"
+        if dist_col not in df.columns or elev_col not in df.columns:
             raise ValueError(
-                f"Expected columns 'distance_m' and 'elevation_m' in {profile_path}"
+                f"Expected columns 'distance'/'elevation' (or 'distance_m'/'elevation_m') in {profile_path}"
             )
 
         half_length = line.length / 2.0
@@ -166,7 +201,7 @@ class FileLabelingPipeline:
             s_channel = float(line.project(Point(coords[1])))
         else:
             s_channel = half_length
-        distances = df["distance_m"].values + s_channel
+        distances = df[dist_col].values + s_channel
 
         def clamp(value: float) -> float:
             return min(max(value, 0.0), line.length)
@@ -177,8 +212,8 @@ class FileLabelingPipeline:
             {
                 "node_id": node_id,
                 "dist_along": distances,
-                "distance_centered": df["distance_m"],
-                "elevation": df["elevation_m"],
+                "distance_centered": df[dist_col],
+                "elevation": df[elev_col],
             },
             geometry=points,
             crs=self.cross_sections.crs,

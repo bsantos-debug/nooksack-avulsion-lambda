@@ -47,3 +47,9 @@ cross_section_profiles/
 !examples/**/*.tif
 !tests/data/**
 !tests/data/**/*.tif
+
+# Regenerable example run products
+examples/synthetic_valley/outputs/
+
+# Local recovery copies (contain machine-specific paths; git snapshot is 2f2764c)
+archive/working_snapshot/

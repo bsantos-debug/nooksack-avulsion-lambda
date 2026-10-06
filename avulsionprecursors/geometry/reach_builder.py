@@ -1,29 +1,29 @@
+"""Build a river reach from a centerline-points shapefile."""
+
 from __future__ import annotations
 
 import geopandas as gpd
 import pandas as pd
 
-from avulsionprecursors.sword.base import SwordNode, SwordReach
+from avulsionprecursors.geometry.nodes import RiverNode, RiverReach
 
 
 def build_reach_from_shapefiles(
     centerline_path: str,
     points_path: str,
     reach_id: int = 1,
-) -> SwordReach:
-    """
-    Build a SwordReach from a centerline points shapefile.
+) -> RiverReach:
+    """Build a RiverReach from a centerline points shapefile.
 
     ``centerline_path`` is accepted for API compatibility; node locations come
-    from ``points_path``. Cross-section LineStrings are attached later (e.g. in
-    ``calculate_lambda.build_reach_with_labels``).
+    from ``points_path``. Cross-section LineStrings are attached later.
     """
-    _ = centerline_path  # optional: could validate CRS vs points in the future
+    _ = centerline_path
     pts = gpd.read_file(points_path)
     if pts.empty:
         raise ValueError(f"No points found in {points_path}")
 
-    nodes: list[SwordNode] = []
+    nodes: list[RiverNode] = []
     for idx, row in pts.iterrows():
         nid_raw = row.get("node_id", idx)
         try:
@@ -45,7 +45,7 @@ def build_reach_from_shapefiles(
                 break
 
         nodes.append(
-            SwordNode(
+            RiverNode(
                 node_id=nid,
                 reach_id=reach_id,
                 dist_out=dist_out,
@@ -58,4 +58,4 @@ def build_reach_from_shapefiles(
         )
 
     nodes.sort(key=lambda n: n.node_id)
-    return SwordReach(reach_id=reach_id, nodes=nodes)
+    return RiverReach(reach_id=reach_id, nodes=nodes)

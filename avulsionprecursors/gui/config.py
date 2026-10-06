@@ -34,3 +34,5 @@ class GUIConfig:
     show_smoothed_profile: bool = True
     smooth_window_m: float = 25.0  # approximate filter length along-track
     smooth_polyorder: int = 2
+    levee_color: str = "magenta"
+    levee_buffer_m: float = 25.0

@@ -20,6 +20,70 @@ from scipy.signal import savgol_filter
 
 from .config import GUIConfig
 
+LEVEE_COLOR = "magenta"
+
+
+def levee_profile_spans(
+    profile: gpd.GeoDataFrame,
+    levees: gpd.GeoDataFrame,
+    buffer_m: float = 25.0,
+    gap_m: float = 40.0,
+) -> List[Tuple[float, float]]:
+    """Along-track intervals where the profile is within ``buffer_m`` of a mapped levee."""
+    if profile is None or getattr(profile, "empty", True) or "geometry" not in profile:
+        return []
+    if levees is None or getattr(levees, "empty", True):
+        return []
+    if profile.crs is None:
+        return []
+    try:
+        lev = levees.to_crs(profile.crs) if levees.crs is not None else levees
+    except Exception:
+        return []
+    geoms = [g for g in lev.geometry if g is not None and not g.is_empty]
+    if not geoms:
+        return []
+    try:
+        union = gpd.GeoSeries(geoms, crs=profile.crs).union_all()
+    except AttributeError:
+        union = gpd.GeoSeries(geoms, crs=profile.crs).unary_union
+    if union is None or union.is_empty:
+        return []
+    dist = profile.geometry.distance(union)
+    near = profile.loc[dist <= float(buffer_m), "dist_along"].to_numpy(dtype=float)
+    near = near[np.isfinite(near)]
+    if near.size == 0:
+        return []
+    near = np.sort(near)
+    groups: List[Tuple[float, float]] = []
+    start = end = float(near[0])
+    gap = float(gap_m)
+    for value in near[1:]:
+        s = float(value)
+        if s - end > gap:
+            groups.append((start, end))
+            start = end = s
+        else:
+            end = s
+    groups.append((start, end))
+    return groups
+
+
+def _iter_line_coords(geom: Any) -> List[Tuple[Any, Any]]:
+    """Yield (x, y) arrays for line-like pieces of a shapely geometry."""
+    if geom is None or geom.is_empty:
+        return []
+    kind = geom.geom_type
+    if kind == "LineString":
+        return [geom.xy]
+    if kind == "Polygon":
+        return [geom.exterior.xy]
+    out: List[Tuple[Any, Any]] = []
+    if hasattr(geom, "geoms"):
+        for part in geom.geoms:
+            out.extend(_iter_line_coords(part))
+    return out
+
 
 class CrossSectionLabeler:
     """Interactive GUI for labeling river cross-sections."""
@@ -35,6 +99,7 @@ class CrossSectionLabeler:
         dem_alpha: float = 0.6,
         satellite_alpha: float = 0.7,
         node_id: Optional[int] = None,
+        levee_gdf: Optional[gpd.GeoDataFrame] = None,
     ):
         self.config = config
         self.output_dir = output_dir
@@ -45,11 +110,14 @@ class CrossSectionLabeler:
         self.show_dem = show_dem
         self.dem_alpha = dem_alpha
         self.satellite_alpha = satellite_alpha
+        self.levee_gdf = levee_gdf
         self.current_label_idx = 0
         self.plotted_points: List[Any] = []
         self.labeled_points: Dict[str, List[Tuple[float, float]]] = {
             label: [] for label in config.labels
         }
+        # ("pick", [label]) or ("skip", [label, ...]) for undo
+        self._action_log: List[Tuple[str, List[str]]] = []
         self.panning = False
         self.pan_start: Optional[Tuple[float, float]] = None
         self.zooming = False
@@ -89,6 +157,11 @@ class CrossSectionLabeler:
         self.cid_release = fig.canvas.mpl_connect("button_release_event", self._on_release)
         self.cid_scroll = fig.canvas.mpl_connect("scroll_event", self._on_scroll)
         self.cid_key = fig.canvas.mpl_connect("key_press_event", self._on_key)
+        # Stop matplotlib from stealing s/h/r (save / home).
+        manager = getattr(fig.canvas, "manager", None)
+        handler_id = getattr(manager, "key_press_handler_id", None) if manager is not None else None
+        if handler_id is not None:
+            fig.canvas.mpl_disconnect(handler_id)
 
     def _on_click(self, event: Any) -> None:
         if event.inaxes != self.ax1:
@@ -127,6 +200,7 @@ class CrossSectionLabeler:
         self.plotted_points.append(point)
 
         self.current_label_idx += 1
+        self._action_log.append(("pick", [current_label]))
         self._update_title()
         self.fig.canvas.draw()
 
@@ -259,6 +333,8 @@ class CrossSectionLabeler:
                 self._profile_x = x[valid][order]
                 self._profile_z_smooth = z_s[valid][order]
 
+        self._plot_levee_profile_marks(ax, df)
+
         ax.set_xlabel("Along Track Distance")
         ax.set_ylabel("Elevation")
         ax.legend(loc="best", fontsize=8)
@@ -351,6 +427,8 @@ class CrossSectionLabeler:
                 label="Cross-section",
                 zorder=5,
             )
+
+        self._plot_levee_map(ax, extent_wgs84)
 
         elevation_values = df_plot["elevation"].values if "elevation" in df_plot.columns else None
         if elevation_values is not None:
@@ -489,14 +567,77 @@ class CrossSectionLabeler:
                 print(f"⚠️  Warning: Could not plot DEM: {e}")
                 return
 
+    def _levee_color(self) -> str:
+        return str(getattr(self.config, "levee_color", LEVEE_COLOR) or LEVEE_COLOR)
+
+    def _plot_levee_profile_marks(self, ax: plt.Axes, df: pd.DataFrame) -> None:
+        if self.levee_gdf is None or not isinstance(df, gpd.GeoDataFrame):
+            return
+        buffer_m = float(getattr(self.config, "levee_buffer_m", 25.0))
+        spans = levee_profile_spans(df, self.levee_gdf, buffer_m=buffer_m)
+        if not spans:
+            return
+        color = self._levee_color()
+        first = True
+        for lo, hi in spans:
+            width = max(hi - lo, 8.0)
+            mid = 0.5 * (lo + hi)
+            ax.axvspan(
+                mid - 0.5 * width,
+                mid + 0.5 * width,
+                color=color,
+                alpha=0.18,
+                zorder=1,
+                label="artificial levee" if first else None,
+            )
+            ax.axvline(mid, color=color, ls="--", lw=1.5, alpha=0.9, zorder=4)
+            first = False
+
+    def _plot_levee_map(self, ax: plt.Axes, extent_wgs84: List[float]) -> None:
+        if self.levee_gdf is None or self.levee_gdf.empty:
+            return
+        try:
+            lev = self.levee_gdf.to_crs(epsg=4326) if self.levee_gdf.crs is not None else self.levee_gdf
+        except Exception as e:
+            print(f"⚠️  Warning: Could not reproject levee overlay: {e}")
+            return
+        pad = 0.01
+        west, east, south, north = extent_wgs84
+        try:
+            from shapely.geometry import box
+
+            clip = box(west - pad, south - pad, east + pad, north + pad)
+            lev = lev[lev.intersects(clip)]
+        except Exception:
+            pass
+        if lev.empty:
+            return
+        color = self._levee_color()
+        drawn = False
+        for geom in lev.geometry:
+            for xs, ys in _iter_line_coords(geom):
+                ax.plot(
+                    xs,
+                    ys,
+                    color=color,
+                    lw=2.2,
+                    transform=ccrs.PlateCarree(),
+                    zorder=8,
+                    label="artificial levee" if not drawn else None,
+                )
+                drawn = True
+
     def _on_key(self, event: Any) -> None:
-        if event.key == "u":
+        key = (event.key or "").lower()
+        if key == "u":
             self._undo_last_point()
-        elif event.key == "d":
+        elif key == "d":
             self._save_and_close()
-        elif event.key == "r":
+        elif key == "r":
             self._reset_view()
-        elif event.key == "h":
+        elif key == "s":
+            self._skip_current_label()
+        elif key == "h":
             self._show_help()
 
     def _xs_prefix(self) -> str:
@@ -517,23 +658,55 @@ class CrossSectionLabeler:
     def _update_title(self) -> None:
         prefix = self._xs_prefix()
         if self.current_label_idx >= len(self.config.labels):
-            title = f"{prefix}  —  All points labeled. Press 'd' to save and continue."
+            title = f"{prefix}  —  Done (skipped labels stay blank). Press 'd' to save."
         else:
             next_label = self.config.labels[self.current_label_idx]
-            title = f"{prefix}  —  Pick {next_label} point"
+            if next_label.startswith("ridge"):
+                hint = "  (s = skip this ridge and its floodplain)"
+            elif next_label.startswith("floodplain"):
+                hint = "  (s = skip)"
+            else:
+                hint = "  (s = skip)"
+            title = f"{prefix}  —  Pick {next_label}{hint}"
+        if self.levee_gdf is not None:
+            title += "   |   magenta = mapped artificial levee"
         self.ax1.set_title(title, fontsize=14, fontweight="bold")
 
+    def _skip_current_label(self) -> None:
+        """Leave the current feature blank. Skipping a ridge also skips its floodplain."""
+        if self.current_label_idx >= len(self.config.labels):
+            print("All labels already placed or skipped. Press d to save.")
+            return
+        skipped: List[str] = []
+        current_label = self.config.labels[self.current_label_idx]
+        skipped.append(current_label)
+        self.current_label_idx += 1
+        if current_label.startswith("ridge") and self.current_label_idx < len(self.config.labels):
+            next_label = self.config.labels[self.current_label_idx]
+            if next_label == current_label.replace("ridge", "floodplain"):
+                skipped.append(next_label)
+                self.current_label_idx += 1
+        self._action_log.append(("skip", skipped))
+        print(f"Skipped: {', '.join(skipped)}")
+        self._update_title()
+        self.fig.canvas.draw()
+
     def _undo_last_point(self) -> None:
-        if self.current_label_idx > 0 and self.plotted_points:
-            self.current_label_idx -= 1
-            current_label = self.config.labels[self.current_label_idx]
-            if self.labeled_points[current_label]:
-                self.labeled_points[current_label].pop()
+        if not self._action_log:
+            return
+        action, labels = self._action_log.pop()
+        if action == "pick":
             if self.plotted_points:
-                point = self.plotted_points.pop()
-                point.remove()
-            self._update_title()
-            self.fig.canvas.draw()
+                last_point = self.plotted_points.pop()
+                last_point.remove()
+            for label in labels:
+                if self.labeled_points[label]:
+                    self.labeled_points[label].pop()
+                self.current_label_idx = max(0, self.current_label_idx - 1)
+        elif action == "skip":
+            self.current_label_idx = max(0, self.current_label_idx - len(labels))
+        self._update_title()
+        self.fig.canvas.draw()
 
     def _save_and_close(self) -> None:
         self._save_labels()
@@ -549,12 +722,15 @@ class CrossSectionLabeler:
         - Left click: Place point (elevation snaps to smoothed profile)
         - Middle click + drag: Pan
         - Scroll wheel: Zoom
-        - 'u': Undo last point
-        - 'd': Done/Save
+        - 's': Skip this label. On a ridge, also skips that ridge's floodplain.
+        - 'u': Undo last point or skip
+        - 'd': Save and continue (remaining labels stay blank)
         - 'r': Reset view
         - 'h': Show this help
 
         Profile panel shows raw DEM (gray) and Savitzky–Golay smooth (blue).
+        Magenta bands/lines are mapped artificial levees — skip those crests as ridges.
+        One ridge + its floodplain is enough; leave the other bank blank if needed.
         """
         print(help_text)
 
@@ -566,23 +742,6 @@ class CrossSectionLabeler:
                 x, y = points[0]
                 records.append({"label": label, "dist_along": x, "elevation": y})
         new_df = pd.DataFrame(records)
-        if output_file.exists() and output_file.stat().st_size > 0:
-            try:
-                old = pd.read_csv(output_file, comment="#")
-            except Exception:
-                old = pd.DataFrame()
-            if not old.empty and "label" in old.columns:
-                replaced = set(new_df["label"]) if not new_df.empty else set()
-                keep = old[~old["label"].astype(str).isin(replaced)]
-                new_df = pd.concat([keep, new_df], ignore_index=True)
-                order = {
-                    lab: i
-                    for i, lab in enumerate(
-                        ["channel", "ridge1", "floodplain1", "ridge2", "floodplain2"]
-                    )
-                }
-                new_df["_ord"] = new_df["label"].map(lambda x: order.get(str(x), 99))
-                new_df = new_df.sort_values("_ord").drop(columns="_ord")
         output_file.parent.mkdir(parents=True, exist_ok=True)
         new_df.to_csv(output_file, index=False)
 

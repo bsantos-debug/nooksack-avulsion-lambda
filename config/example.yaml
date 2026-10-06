@@ -1,0 +1,64 @@
+# Example configuration for avulsionprecursors
+#
+# Copy this file and point paths at your own DEM and centerline.
+# Relative paths are resolved from the folder that contains this file.
+#
+# Horizontal distances (spacing, transect length, smoothing) use the working
+# CRS units after reprojection (usually metres).
+# Elevation thresholds (valley_wall_dz, max_elev_above_channel) use the DEM's
+# native vertical units. This tool does not convert feet to metres.
+
+study_name: example_river
+
+crs:
+  # "UTM" chooses a UTM zone from the data centroid, or set e.g. "EPSG:32610"
+  target: UTM
+  # Only needed if a file is missing CRS metadata
+  dem_source: null
+  centerline_source: null
+  vector_source: null
+
+units:
+  # native | m | ft | us_ft  (documentation only; values are not converted)
+  vertical: native
+
+paths:
+  dem: ../inputs/dem.tif
+  centerline: ../inputs/centerline.shp
+  channel_polygon: null          # optional polygon of the wetted channel
+  centerline_points: null        # optional; otherwise stations are auto-spaced
+  clip_boundary: null            # optional mask / clip polygon
+  levee: null                    # optional line overlay of mapped artificial levees
+  output_dir: ../outputs
+
+extract:
+  spacing: 200                   # station spacing (working CRS units)
+  cross_half_length: 800         # minimum half-width of each transect
+  max_half_length: 4000          # probe distance before valley-wall clip
+  sample_step: null              # null = use DEM cell size
+  valley_wall_dz: 30             # native vertical units (metres in the original workflow)
+  valley_wall_persist: 50        # must stay above threshold for this distance
+  valley_wall_skip_channel: 200  # ignore bars/levees this close to the channel
+  valley_wall_keep: 100          # keep a short toe past the wall trigger
+  max_elev_above_channel: 40     # mask samples this high above the channel; null disables
+  channel_elev_window: 50        # window used for the near-channel elevation
+  backwater_length: 5000         # unused for Sm (kept for older configs)
+  centerline_smooth_window: 400  # Savitzky–Golay window for azimuth only
+  centerline_smooth_sample: 10
+  flow_tangent_half_delta: 100
+  slope_smooth_window: 15000     # SG window for the thalweg long profile
+  slope_sample_step: 5
+  thalweg_half_width: 80         # half-width of the min-z search strip
+  slope_min: 1.0e-5              # flag tiny Sm; values are not floored
+
+lambda_calc:
+  labels_dir: null               # null = <output_dir>/labels
+  auto_minmax: false             # true: channel=min, ridges=max (can pick valley walls)
+  labels_since: null
+
+labeler:
+  show_satellite: true
+  show_dem: true
+  skip_existing: true
+  overlay_existing: true         # faded previous picks in the GUI
+  levee_buffer: 25               # metres; profile ticks where the XS nears a mapped levee

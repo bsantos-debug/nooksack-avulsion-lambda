@@ -1,21 +1,25 @@
 # Archived files
 
-Not used by the current Nooksack topobathy → lambda workflow.
+These files are **not** used by the reusable DEM → lambda package. They remain so the
+pre-generalization Nooksack workflow can be recovered.
 
-## Current workflow (repo root)
+A git snapshot of the working tree before refactoring is commit `2f2764c`.
 
-1. `Crosssections.py` — build cross-sections + elevation profiles
-2. `run_labeler.py` — optional interactive labeling
-3. `calculate_lambda_bathymetry.py` — lambda from profile min/max + topobathy
-4. `plot_lambda_on_dem.py` — map lambda on DEM
+## Reusable workflow (current)
 
-Supporting package: `avulsionprecursors/`
-Outputs: `data/`, `cross_sections.*`, `centerline_points_from_xs.*`, `cross_section_profiles/`
+```bash
+python -m avulsionprecursors extract -c config/example.yaml
+python -m avulsionprecursors label   -c config/example.yaml
+python -m avulsionprecursors lambda  -c config/example.yaml
+```
 
 ## What’s in this archive
 
 | path | contents |
 |------|----------|
-| `legacy/` | Old XGBoost lambda, SWORD/GEE `main.py`, SWORD importers, d50/shear scripts, older XS tools |
+| `working_snapshot/` | Root scripts and analysis modules as of the pre-refactor snapshot |
+| `legacy/` | Older XGBoost lambda, SWORD/GEE `main.py`, SWORD importers, d50/shear scripts |
 | `docs/` | BASED requirements, SWORD import guide + product PDF |
-| `data/` | Older bathymetry raster (`bathy_15_ft_int.tif`) |
+
+Nooksack-only lidar comparison scripts also live in `local/` on this machine
+(gitignored; not for the public repository).
