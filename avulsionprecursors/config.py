@@ -108,11 +108,48 @@ class ExtractConfig:
     centerline_smooth_window: float = 400.0
     centerline_smooth_sample: float = 10.0
     flow_tangent_half_delta: float = 100.0
+    # True: transect direction is the mean tangent of this station and its
+    # neighbors. False: use only the tangent at the station, so bends stay
+    # perpendicular to the local centerline.
+    azimuth_include_neighbors: bool = True
     slope_min: float = 1e-5  # flag only; Sm is not floored
     default_slope: float = 1e-4  # unused; missing Sm stays NaN
     slope_smooth_window: float = 15000.0
     slope_sample_step: float = 5.0
     thalweg_half_width: float = 80.0
+
+
+@dataclass
+class RoutingConfig:
+    """Softmax avulsion routing used by the separate routing-slope lambda.
+
+    Each walk starts at the crest of the lower ridge on that node's
+    transect (the same bank Λ uses). ``path_length`` is the walk distance
+    in working-CRS units. ``None`` uses ``extract.spacing``, so each route
+    covers one station interval.
+
+    ``start_offset`` is unused. It remains so older config files still load.
+    The seed is the labeled lower-ridge crest, not a fixed offset from the node.
+
+    ``theta``, ``alpha``, and ``beta`` match the Figure 4 tool
+    (θ = 10, α = 1, β = 0.5).
+
+    ``cell_m`` is the cell size the walker sees, in working-CRS units.
+    A finer DEM is averaged up to that size first. Gearon's walks used
+    ~30 m elevation models; on a 1 m lidar grid the same weights follow
+    furrows, because slope is scored as rise per pixel. 0 keeps the
+    native cell size.
+    """
+
+    theta: float = 10.0
+    alpha: float = 1.0
+    beta: float = 0.5
+    n_trials: int = 100
+    cell_m: float = 30.0
+    path_length: Optional[float] = None
+    start_offset: float = 0.0
+    frequency_threshold: float = 0.075  # fraction of the busiest cell's visit count
+    seed: int = 0
 
 
 @dataclass
@@ -139,6 +176,8 @@ class LabelerConfig:
     skip_existing: bool = True
     overlay_existing: bool = True  # faded previous picks in the GUI
     levee_buffer: float = 25.0  # metres; profile ticks where the XS nears a mapped levee
+    # Copied into labels/README.md when the picker starts, next to the CSVs.
+    note: Optional[str] = None
 
 
 @dataclass
@@ -153,6 +192,7 @@ class WorkflowConfig:
     units: UnitsConfig = field(default_factory=UnitsConfig)
     extract: ExtractConfig = field(default_factory=ExtractConfig)
     lambda_calc: LambdaConfig = field(default_factory=LambdaConfig)
+    routing: RoutingConfig = field(default_factory=RoutingConfig)
     labeler: LabelerConfig = field(default_factory=LabelerConfig)
     config_path: Optional[Path] = None
 
@@ -188,6 +228,18 @@ class WorkflowConfig:
 
     def lambda_plot_path(self) -> Path:
         return self.output_dir() / f"{self.study_name}_lambda_plot.png"
+
+    def lambda_routing_csv_path(self) -> Path:
+        return self.output_dir() / f"{self.study_name}_lambda_routing.csv"
+
+    def lambda_routing_plot_path(self) -> Path:
+        return self.output_dir() / f"{self.study_name}_lambda_routing_plot.png"
+
+    def routing_slopes_csv_path(self) -> Path:
+        return self.output_dir() / f"{self.study_name}_routing_slopes.csv"
+
+    def routing_paths_path(self) -> Path:
+        return self.output_dir() / f"{self.study_name}_routing_paths.shp"
 
     def prepared_dem_path(self) -> Path:
         return self.prepared_dir() / "dem.tif"
@@ -287,6 +339,8 @@ def load_config(path: Union[str, Path]) -> WorkflowConfig:
         _update_dataclass(cfg.extract, raw["extract"] or {})
     if "lambda_calc" in raw:
         _update_dataclass(cfg.lambda_calc, raw["lambda_calc"] or {})
+    if "routing" in raw:
+        _update_dataclass(cfg.routing, raw["routing"] or {})
     if "labeler" in raw:
         _update_dataclass(cfg.labeler, raw["labeler"] or {})
 
@@ -332,15 +386,28 @@ def _coerce_types(cfg: WorkflowConfig) -> None:
     ext.centerline_smooth_window = float(ext.centerline_smooth_window)
     ext.centerline_smooth_sample = float(ext.centerline_smooth_sample)
     ext.flow_tangent_half_delta = float(ext.flow_tangent_half_delta)
+    ext.azimuth_include_neighbors = bool(ext.azimuth_include_neighbors)
     ext.slope_min = float(ext.slope_min)
     ext.default_slope = float(ext.default_slope)
     ext.slope_smooth_window = float(ext.slope_smooth_window)
     ext.slope_sample_step = float(ext.slope_sample_step)
     ext.thalweg_half_width = float(ext.thalweg_half_width)
     cfg.lambda_calc.auto_minmax = bool(cfg.lambda_calc.auto_minmax)
+    route = cfg.routing
+    route.theta = float(route.theta)
+    route.alpha = float(route.alpha)
+    route.beta = float(route.beta)
+    route.n_trials = int(route.n_trials)
+    route.cell_m = float(route.cell_m)
+    route.path_length = _optional_float(route.path_length)
+    route.start_offset = float(route.start_offset)
+    route.frequency_threshold = float(route.frequency_threshold)
+    route.seed = int(route.seed)
     cfg.labeler.skip_existing = bool(cfg.labeler.skip_existing)
     cfg.labeler.overlay_existing = bool(cfg.labeler.overlay_existing)
     cfg.labeler.levee_buffer = float(cfg.labeler.levee_buffer)
+    note = cfg.labeler.note
+    cfg.labeler.note = str(note).strip() if note else None
 
 
 def apply_cli_overrides(cfg: WorkflowConfig, overrides: Mapping[str, Any]) -> WorkflowConfig:

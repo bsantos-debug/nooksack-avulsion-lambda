@@ -56,9 +56,23 @@ lambda_calc:
   auto_minmax: false             # true: channel=min, ridges=max (can pick valley walls)
   labels_since: null
 
+# Separate from lambda. Does not overwrite <study>_lambda_results.csv.
+# Each walk starts at the lower-ridge crest and covers one station interval.
+routing:
+  theta: 10                      # slope weight (Figure 4 / ϕ)
+  alpha: 1                       # inertia weight
+  beta: 0.5                      # 1 = slope only, 0 = inertia only
+  n_trials: 100
+  cell_m: 30                     # average a finer DEM to this cell size before the walk; 0 = native
+  path_length: null              # null = extract.spacing
+  start_offset: 0                # unused; the seed is the lower-ridge crest
+  frequency_threshold: 0.075     # fraction of the busiest cell's visit count
+  seed: 0
+
 labeler:
   show_satellite: true
   show_dem: true
   skip_existing: true
   overlay_existing: true         # faded previous picks in the GUI
   levee_buffer: 25               # metres; profile ticks where the XS nears a mapped levee
+  note: null                     # copied into labels/README.md next to the pick CSVs

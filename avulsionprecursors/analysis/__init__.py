@@ -8,6 +8,7 @@ from avulsionprecursors.analysis.metrics import (
     ridge_aspect_slope,
     superelevation,
 )
+from avulsionprecursors.analysis.routing import routing_slope_at_seed
 
 __all__ = [
     "alluvial_ridge_height",
@@ -18,4 +19,5 @@ __all__ = [
     "gamma_from_sar",
     "ridge_aspect_slope",
     "superelevation",
+    "routing_slope_at_seed",
 ]

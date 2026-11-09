@@ -1,6 +1,17 @@
 MIT License
 
+Copyright (c) 2025 Jake Gearon
 Copyright (c) 2026 bsantos-debug
+
+This project is adapted from
+https://github.com/jameshgrn/avulsionprecursors/tree/first
+companion code to Gearon and Edmonds (2025), Geophysical Research Letters,
+https://doi.org/10.1029/2024GL114047.
+
+The avulsion-routing walk is adapted from
+https://github.com/jameshgrn/rulesofriveravulsion
+companion code to Gearon et al. (2024), Nature,
+https://doi.org/10.1038/s41586-024-07964-2.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

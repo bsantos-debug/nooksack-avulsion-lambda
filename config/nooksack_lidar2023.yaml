@@ -1,0 +1,67 @@
+# Nooksack lambda transects from the 2023 lidar + 2024 bathymetry DEM.
+#
+# Elevations in the DEM are NAVD88 US survey feet. Horizontal distances below
+# are metres (working CRS is UTM zone 10N). Valley-wall and height masks are
+# in feet: 98 ft ≈ 30 m, 131 ft ≈ 40 m.
+#
+# The centerline follows the middle of the 2025 bankfull extent, then the
+# modern Nooksack centerline from the downstream end of that extent to the
+# mouth. The bankfull polygon is drawn on the picker where each transect
+# crosses it.
+
+study_name: nooksack_lidar2023
+
+crs:
+  target: EPSG:26910
+
+units:
+  vertical: us_ft
+
+paths:
+  dem: /Volumes/Extreme SSD/Nooksack_data/DEMs/nooksack_lidar2023_corridor_utm10_3m.tif
+  centerline: ../studies/nooksack_bathy2022/centerline/centerline_bankfull_and_lower.shp
+  channel_polygon: /Users/BrookeMac/Library/CloudStorage/OneDrive-UW 2/Data/Washington/Nooksack/Model_outputs/Bankfull_flow_extent_2025.shp
+  centerline_points: null
+  clip_boundary: null
+  levee: null
+  output_dir: ../outputs/nooksack_lidar2023
+
+extract:
+  spacing: 200
+  cross_half_length: 800
+  max_half_length: 4000
+  sample_step: 5
+  valley_wall_dz: 98
+  valley_wall_persist: 50
+  valley_wall_skip_channel: 200
+  valley_wall_keep: 100
+  # null: keep elevations out to the valley-wall clip. A ceiling here was
+  # blanking the banks, so the picker only showed the active channel.
+  max_elev_above_channel: null
+  channel_elev_window: 50
+  backwater_length: 5000
+  centerline_smooth_window: 150
+  centerline_smooth_sample: 10
+  flow_tangent_half_delta: 40
+  azimuth_include_neighbors: false
+  slope_smooth_window: 15000
+  slope_sample_step: 10
+  thalweg_half_width: 250
+  slope_min: 1.0e-5
+
+lambda_calc:
+  labels_dir: null
+  auto_minmax: false
+  labels_since: null
+
+labeler:
+  show_satellite: true
+  show_dem: true
+  skip_existing: true
+  overlay_existing: true
+  levee_buffer: 25
+  note: |
+    2023 lidar with 2024 bathymetry. Elevations stay in NAVD88 US survey feet.
+    Same centerline, bankfull polygon, and transect lengths as the 2022 run.
+    The centerline goes through the middle of the 2025 bankfull polygon, then follows the modern Nooksack centerline downstream of that polygon.
+    Cyan on the profile is where the bankfull polygon crosses the transect.

@@ -140,6 +140,22 @@ def validate_config(cfg: WorkflowConfig) -> None:
             "extract.max_elev_above_channel must be positive, or null to disable."
         )
 
+    route = cfg.routing
+    if route.theta < 0 or route.alpha < 0:
+        raise InputValidationError("routing.theta and routing.alpha must be zero or positive.")
+    if not 0.0 <= route.beta <= 1.0:
+        raise InputValidationError("routing.beta must be between 0 and 1.")
+    if route.n_trials < 1:
+        raise InputValidationError("routing.n_trials must be at least 1.")
+    if route.cell_m < 0:
+        raise InputValidationError("routing.cell_m must be zero (native cell size) or positive.")
+    if route.path_length is not None and route.path_length <= 0:
+        raise InputValidationError("routing.path_length must be positive, or null to use extract.spacing.")
+    if route.start_offset < 0:
+        raise InputValidationError("routing.start_offset must be zero or positive.")
+    if not 0.0 < route.frequency_threshold <= 1.0:
+        raise InputValidationError("routing.frequency_threshold must be greater than 0 and at most 1.")
+
     target = str(cfg.crs.target).strip()
     if not target:
         raise CRSError("crs.target is empty. Use 'UTM' or an EPSG code such as EPSG:32610.")

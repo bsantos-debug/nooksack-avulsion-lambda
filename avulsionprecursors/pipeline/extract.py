@@ -109,12 +109,21 @@ def extract_cross_sections(
     print(f"Signed thalweg Sm: {n_down} downhill, {n_adv} adverse/zero, {n_miss} missing")
 
     perp_azimuths = perpendicular_azimuths(
-        points, river, river_azimuth, ext.flow_tangent_half_delta
+        points,
+        river,
+        river_azimuth,
+        ext.flow_tangent_half_delta,
+        include_neighbors=ext.azimuth_include_neighbors,
+    )
+    neighbor_note = (
+        "circular mean of node ± neighbors"
+        if ext.azimuth_include_neighbors
+        else "tangent at the node only"
     )
     print(
         f"Cross-section normals from smoothed flow azimuth "
-        f"(SG window {ext.centerline_smooth_window:g}; circular mean of node ± "
-        f"neighbors; tangent Δ = ±{ext.flow_tangent_half_delta:g})"
+        f"(SG window {ext.centerline_smooth_window:g}; {neighbor_note}; "
+        f"tangent Δ = ±{ext.flow_tangent_half_delta:g})"
     )
 
     if channel_union is not None:

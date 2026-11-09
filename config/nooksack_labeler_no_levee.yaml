@@ -1,0 +1,51 @@
+# Parallel no-levee Nooksack labeler config (v2).
+# Same geometry/profiles as v1; separate study_name + labels_dir so old picks stay.
+#
+# Before first run, archive v1:
+#   python studies/nooksack_2022_topobathy/archive_local_v1.py --also-sidecar
+#
+# Then pick in the GUI (ignore levee-scale crests; magenta = mapped levees if set):
+#   python -m avulsionprecursors label -c config/nooksack_labeler_no_levee.yaml
+#
+# Labels → data/labels_no_levee/Nooksack_no_levee_node_<id>_labels.csv
+
+study_name: Nooksack_no_levee
+
+crs:
+  target: EPSG:26910
+
+units:
+  vertical: ft
+
+paths:
+  dem: ../data/Topobathy_reprojected.tif
+  centerline: ../data/centerline.shp
+  channel_polygon: null
+  centerline_points: null
+  clip_boundary: null
+  levee: null   # recommended: mapped levees so the GUI highlights them to skip
+  # Reuse the same extract outputs as the with-levee run when possible.
+  # If cross_sections.shp + profiles live under data/, keep output_dir here.
+  # If they live at the repo root (legacy), set output_dir: .. and copy/symlink
+  # profiles into that tree, or re-point after extract.
+  output_dir: ../data
+
+extract:
+  spacing: 200
+  cross_half_length: 800
+  max_half_length: 4000
+  valley_wall_dz: 30
+  valley_wall_persist: 50
+  valley_wall_skip_channel: 200
+  max_elev_above_channel: 40
+
+lambda_calc:
+  labels_dir: ../data/labels_no_levee
+  auto_minmax: false
+
+labeler:
+  show_satellite: true
+  show_dem: true
+  skip_existing: true
+  overlay_existing: true
+  levee_buffer: 25

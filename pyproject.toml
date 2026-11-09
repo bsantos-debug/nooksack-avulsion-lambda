@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "avulsionprecursors"
 version = "0.2.0"
-description = "Extract river cross-sections from a DEM and compute avulsion potential (Λ) from alluvial-ridge geometry"
-authors = ["Avulsion Precursors contributors"]
+description = "Config-driven DEM workflow for avulsion potential (Λ), adapted from Jake Gearon's avulsionprecursors (https://github.com/jameshgrn/avulsionprecursors/tree/first) and rulesofriveravulsion routing walk (https://github.com/jameshgrn/rulesofriveravulsion)"
+authors = ["bsantos-debug"]
 readme = "README.md"
 packages = [{include = "avulsionprecursors"}]
 

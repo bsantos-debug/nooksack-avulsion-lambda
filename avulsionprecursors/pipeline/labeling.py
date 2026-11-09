@@ -70,6 +70,10 @@ class FileLabelingPipeline:
         levee_gdf: Optional[gpd.GeoDataFrame] = None,
         overlay_existing_picks: bool = True,
         levee_buffer_m: Optional[float] = None,
+        channel_overlay_path: Optional[Path] = None,
+        channel_gdf: Optional[gpd.GeoDataFrame] = None,
+        reference_labels_dir: Optional[Path] = None,
+        reference_river_name: Optional[str] = None,
     ):
         self.cross_sections_path = Path(cross_sections_path)
         self.profiles_dir = Path(profiles_dir)
@@ -81,6 +85,10 @@ class FileLabelingPipeline:
         self.show_satellite = show_satellite
         self.show_dem = show_dem
         self.overlay_existing_picks = overlay_existing_picks
+        self.reference_labels_dir = (
+            Path(reference_labels_dir) if reference_labels_dir else None
+        )
+        self.reference_river_name = reference_river_name or "Nooksack"
         if levee_buffer_m is not None:
             self.gui_config.levee_buffer_m = float(levee_buffer_m)
 
@@ -92,6 +100,16 @@ class FileLabelingPipeline:
             self.levee_gdf = gpd.read_file(overlay)
             print(
                 f"🗺️  Levee overlay: {len(self.levee_gdf)} features from {overlay}"
+            )
+
+        self.channel_gdf = channel_gdf
+        if self.channel_gdf is None and channel_overlay_path is not None:
+            channel_path = Path(channel_overlay_path)
+            if not channel_path.exists():
+                raise FileNotFoundError(f"Channel overlay not found: {channel_path}")
+            self.channel_gdf = gpd.read_file(channel_path)
+            print(
+                f"🗺️  Bankfull channel overlay: {len(self.channel_gdf)} features from {channel_path}"
             )
 
         if not self.cross_sections_path.exists():
@@ -155,10 +173,28 @@ class FileLabelingPipeline:
                 show_dem=self.show_dem,
                 node_id=node_id,
                 levee_gdf=self.levee_gdf,
+                channel_gdf=self.channel_gdf,
             )
 
-            predicted = _existing_pick_distances(output_file) if show_old else None
+            predicted = None
+            predicted_source = None
+            if show_old:
+                predicted = _existing_pick_distances(output_file)
+                if predicted:
+                    predicted_source = output_file
+                elif self.reference_labels_dir is not None:
+                    ref_file = (
+                        self.reference_labels_dir
+                        / f"{self.reference_river_name}_node_{node_id}_labels.csv"
+                    )
+                    predicted = _existing_pick_distances(ref_file)
+                    if predicted:
+                        predicted_source = ref_file
             print(f"\nLabeling cross-section for node {node_id}")
+            if predicted_source is not None:
+                print(
+                    f"Faded overlay: {len(predicted)} picks from {predicted_source}"
+                )
             labeler.label_cross_section(profile_gdf, predicted_points=predicted)
 
     def _filter_cross_sections(self, node_ids: Optional[Sequence[int]]) -> gpd.GeoDataFrame:

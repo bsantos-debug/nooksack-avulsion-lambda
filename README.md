@@ -7,6 +7,12 @@ The workflow is meant to be reused on new DEMs. Site-specific paths, CRS,
 resolution, and thresholds belong in a YAML config (or CLI flags), not in the
 processing functions.
 
+## Attribution
+
+Adapted from Jake Gearon's [avulsionprecursors](https://github.com/jameshgrn/avulsionprecursors/tree/first), companion code to Gearon and Edmonds (2025), *Geophysical Research Letters*, https://doi.org/10.1029/2024GL114047.
+
+This version reworks that code into a config-driven DEM workflow and extends the analysis for a new study site. The original scientific definitions of Λ are unchanged.
+
 ---
 
 ## What the tool does
@@ -141,6 +147,29 @@ or pass `--auto-minmax`):
 python -m avulsionprecursors run -c config/my_river.yaml
 ```
 
+`lambda` uses the thalweg slope. To keep that result and also compute Λ with
+the slope of the most frequent avulsion-routing paths, run:
+
+```bash
+python -m avulsionprecursors lambda-routing -c config/my_river.yaml
+```
+
+That command starts Gearon et al.'s softmax random walk at the crest of the
+lower ridge on each transect, for one station interval (`extract.spacing`, or
+`routing.path_length`). The slope used in Λ is the visit-weighted map slope of
+steps that land in cells with at least `routing.frequency_threshold` of the
+peak visit count. Har, SAR, and the lower-ridge rule are unchanged, so
+γ = SAR / S_routing. Results go to `<study>_lambda_routing.csv` and do not
+replace `<study>_lambda_results.csv`. Steps back toward the channel are blocked
+until the walk has moved past the crest onto the outer bank, or downstream
+at least as far as the crest is from the channel. The channel itself stays
+closed for the whole walk: the centerline is buffered by half the measured
+width, and those cells are treated as nodata. The walk scores slope as rise per pixel, as Gearon's code does
+on a ~30 m elevation model. A finer DEM is averaged to `routing.cell_m`
+(default 30 m) before the walk, so furrows and lidar noise do not outrank
+the valley slope. Set `cell_m` to 0 to walk the native grid. The walk is adapted from
+[rulesofriveravulsion](https://github.com/jameshgrn/rulesofriveravulsion).
+
 The labeler asks you to click, in order: channel, ridge1, floodplain1, ridge2,
 floodplain2. If `paths.levee` is set, mapped artificial levees are drawn in
 magenta on the DEM/satellite maps and as bands on the profile.
@@ -151,6 +180,12 @@ ridges. Auto-minmax does **not** pick floodplains; Λ still needs floodplain
 elevations for \(H_{ar}\).
 
 A tiny synthetic example (no research data) is in `examples/synthetic_valley/`.
+
+The November 2026 Nooksack run (2022 bathymetry, 2023 lidar, bankfull
+centerline, and the labeler notes) is written up so it can be repeated on
+another computer that has the same data files:
+
+`studies/nooksack_bathy2022/README.md`
 
 ---
 
@@ -200,9 +235,23 @@ Tests use a small synthetic valley DEM, not research rasters.
 
 ## Citation
 
-If you use the Λ definitions in research, please cite:
+If you use the Λ definitions in research, cite the paper:
 
-*River Avulsion Precursors Encoded in Alluvial Ridge Geometry*, GRL.
+Gearon, J. H., & Edmonds, D. A. (2025). River avulsion precursors encoded in alluvial ridge geometry. *Geophysical Research Letters, 52*(8). https://doi.org/10.1029/2024GL114047
+
+If you use this workflow, also cite the code it was adapted from:
+
+Gearon, J. H. avulsionprecursors. https://github.com/jameshgrn/avulsionprecursors/tree/first
+
+If you use the routing-slope lambda, also cite:
+
+Gearon, J. H., Martin, H. K., DeLisle, C., Barefoot, E. A., Mohrig, D., Paola, C., & Edmonds, D. A. (2024). Rules of river avulsion change downstream. *Nature, 634*, 91–95. https://doi.org/10.1038/s41586-024-07964-2
+
+Gearon, J. H. rulesofriveravulsion. https://github.com/jameshgrn/rulesofriveravulsion
+
+and this repository:
+
+https://github.com/bsantos-debug/nooksack-avulsion-lambda
 
 ---
 

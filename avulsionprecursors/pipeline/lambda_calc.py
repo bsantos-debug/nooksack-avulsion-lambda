@@ -123,7 +123,12 @@ def _parse_labels_since(raw: Optional[str]) -> Optional[datetime]:
     )
 
 
-def plot_lambda_vs_distance(df: pd.DataFrame, study_name: str, output_path: Path) -> None:
+def plot_lambda_vs_distance(
+    df: pd.DataFrame,
+    study_name: str,
+    output_path: Path,
+    title: Optional[str] = None,
+) -> None:
     """Save Λ vs distance from outlet."""
     if df.empty or "lambda" not in df.columns or "dist_out" not in df.columns:
         print("Warning: cannot plot — missing lambda or dist_out")
@@ -153,7 +158,11 @@ def plot_lambda_vs_distance(df: pd.DataFrame, study_name: str, output_path: Path
     ax.grid(True, alpha=0.3, linestyle="--")
     ax.legend(loc="best", fontsize=10)
     ax.invert_xaxis()
-    ax.set_title(f"{study_name} — lambda vs distance downstream", fontsize=14, pad=15)
+    ax.set_title(
+        title or f"{study_name} — lambda vs distance downstream",
+        fontsize=14,
+        pad=15,
+    )
     stats_text = (
         f"N = {len(df_plot)}\n"
         f"Min: {df_plot['lambda'].min():.3f}\n"
@@ -178,14 +187,12 @@ def plot_lambda_vs_distance(df: pd.DataFrame, study_name: str, output_path: Path
     print(f"Plot saved to: {output_path}")
 
 
-def calculate_lambda(cfg: WorkflowConfig) -> pd.DataFrame:
-    """Attach labels, apply the lower-ridge rule, and write Λ.
+def assemble_lambda_table(cfg: WorkflowConfig, *, require_slope: bool = True) -> pd.DataFrame:
+    """Build the labeled node table used by both lambda calculations.
 
-    Required inputs
-    ---------------
-    Centerline points and cross-sections from the extract step, plus either
-    labeler CSVs (channel, ridge1/2, floodplain1/2) or ``auto_minmax`` for
-    channel/ridges only (floodplains still required for Har).
+    ``require_slope`` keeps only nodes that already have a thalweg slope.
+    The routing lambda sets it False so a node can still be used when the
+    thalweg slope is missing.
     """
     validate_config(cfg)
     points_path = cfg.centerline_points_path()
@@ -206,21 +213,6 @@ def calculate_lambda(cfg: WorkflowConfig) -> pd.DataFrame:
     labels_dir = cfg.labels_dir()
     profiles_dir = cfg.profiles_dir()
     auto_minmax = bool(cfg.lambda_calc.auto_minmax)
-
-    print(f"Calculating lambda for {study}")
-    if auto_minmax:
-        print(
-            "Channel/ridge picks: profile min / left-right max. "
-            "This can select valley walls when they are taller than levees. "
-            "Floodplain labels are still required for Har."
-        )
-    else:
-        print(f"Labels directory: {labels_dir}")
-        if labels_min_mtime is not None:
-            print(f"Only files saved since {labels_min_mtime:%Y-%m-%d %H:%M}")
-    print("Hm definition: ridge crest − channel bed")
-    print("Ridge rule: lower crest")
-    print("Sm: signed downhill thalweg slope (SG-smoothed long profile)")
 
     reach = build_reach_from_shapefiles(
         centerline_path=str(cfg.prepared_centerline_path()),
@@ -243,7 +235,9 @@ def calculate_lambda(cfg: WorkflowConfig) -> pd.DataFrame:
 
     rows = []
     for node in reach.nodes:
-        if node.cross_section is None or node.slope is None:
+        if node.cross_section is None:
+            continue
+        if require_slope and node.slope is None:
             continue
         rows.append(
             {
@@ -251,13 +245,16 @@ def calculate_lambda(cfg: WorkflowConfig) -> pd.DataFrame:
                 "reach_id": node.reach_id,
                 "dist_out": node.dist_out,
                 "width": float(node.width) if node.width is not None else np.nan,
-                "slope": float(node.slope),
+                "slope": float(node.slope) if node.slope is not None else np.nan,
                 "elevation": float(node.elevation) if node.elevation is not None else np.nan,
+                "x": float(node.geometry.x) if node.geometry is not None else np.nan,
+                "y": float(node.geometry.y) if node.geometry is not None else np.nan,
             }
         )
     df = pd.DataFrame(rows)
     if df.empty:
-        raise InputValidationError("No nodes with cross-sections and slope were found.")
+        missing = "cross-sections and slope" if require_slope else "cross-sections"
+        raise InputValidationError(f"No nodes with {missing} were found.")
 
     label_columns = [
         "channel_dist_along",
@@ -306,7 +303,43 @@ def calculate_lambda(cfg: WorkflowConfig) -> pd.DataFrame:
             f"Label CSVs should look like {study}_node_<id>_labels.csv in:\n  {labels_dir}\n"
             "Auto-minmax only picks channel and ridges; floodplains still need the labeler."
         )
+    return df.reset_index(drop=True)
 
+
+def calculate_lambda(cfg: WorkflowConfig) -> pd.DataFrame:
+    """Attach labels, apply the lower-ridge rule, and write Λ.
+
+    Required inputs
+    ---------------
+    Centerline points and cross-sections from the extract step, plus either
+    labeler CSVs (channel, ridge1/2, floodplain1/2) or ``auto_minmax`` for
+    channel/ridges only (floodplains still required for Har).
+
+    Sm is the signed downhill thalweg slope from extract. The routing-slope
+    lambda is a separate command and does not change this file.
+    """
+    study = cfg.study_name
+    labels_dir = cfg.labels_dir()
+    auto_minmax = bool(cfg.lambda_calc.auto_minmax)
+    labels_min_mtime = _parse_labels_since(cfg.lambda_calc.labels_since)
+
+    print(f"Calculating lambda for {study}")
+    if auto_minmax:
+        print(
+            "Channel/ridge picks: profile min / left-right max. "
+            "This can select valley walls when they are taller than levees. "
+            "Floodplain labels are still required for Har."
+        )
+    else:
+        print(f"Labels directory: {labels_dir}")
+        if labels_min_mtime is not None:
+            print(f"Only files saved since {labels_min_mtime:%Y-%m-%d %H:%M}")
+    print("Hm definition: ridge crest − channel bed")
+    print("Ridge rule: lower crest")
+    print("Sm: signed downhill thalweg slope (SG-smoothed long profile)")
+
+    df = assemble_lambda_table(cfg, require_slope=True)
+    df = df.drop(columns=["x", "y"], errors="ignore")
     df = apply_ridge_parameters(df, slope_min=cfg.extract.slope_min)
     n_valid = int(df["flag_valid_lambda"].sum()) if "flag_valid_lambda" in df.columns else len(df)
     n_adv = int(df["flag_adverse_slope"].sum()) if "flag_adverse_slope" in df.columns else 0

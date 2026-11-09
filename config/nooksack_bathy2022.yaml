@@ -1,0 +1,65 @@
+# Nooksack lambda transects from the 2023 lidar + 2022 bathymetry DEM.
+#
+# Same centerline, bankfull polygon, and valley-wall lengths as the 2024 run.
+# Elevations are NAVD88 US survey feet from nooksack_lidar2023_bathy2022.tif.
+# Horizontal distances are metres (UTM zone 10N).
+#
+# paths.dem and paths.channel_polygon are local files. On another computer,
+# change those two paths. The steps are in studies/nooksack_bathy2022/README.md.
+
+study_name: nooksack_bathy2022
+
+crs:
+  target: EPSG:26910
+
+units:
+  vertical: us_ft
+
+paths:
+  dem: /Volumes/Extreme SSD/Nooksack_data/DEMs/nooksack_lidar2023_bathy2022_corridor_utm10_3m_upstream_fill.tif
+  centerline: ../studies/nooksack_bathy2022/centerline/centerline_bankfull_and_lower.shp
+  channel_polygon: /Users/BrookeMac/Library/CloudStorage/OneDrive-UW 2/Data/Washington/Nooksack/Model_outputs/Bankfull_flow_extent_2025.shp
+  centerline_points: null
+  clip_boundary: null
+  levee: null
+  output_dir: ../outputs/nooksack_bathy2022
+
+extract:
+  spacing: 200
+  cross_half_length: 800
+  max_half_length: 4000
+  sample_step: 5
+  valley_wall_dz: 98
+  valley_wall_persist: 50
+  valley_wall_skip_channel: 200
+  valley_wall_keep: 100
+  max_elev_above_channel: null
+  channel_elev_window: 50
+  backwater_length: 5000
+  centerline_smooth_window: 150
+  centerline_smooth_sample: 10
+  flow_tangent_half_delta: 40
+  azimuth_include_neighbors: false
+  slope_smooth_window: 15000
+  slope_sample_step: 10
+  thalweg_half_width: 250
+  slope_min: 1.0e-5
+
+lambda_calc:
+  labels_dir: null
+  auto_minmax: false
+  labels_since: null
+
+labeler:
+  show_satellite: true
+  show_dem: true
+  skip_existing: true
+  overlay_existing: true
+  levee_buffer: 25
+  note: |
+    2023 lidar with 2022 bathymetry. Elevations stay in NAVD88 US survey feet.
+    The centerline goes through the middle of the 2025 bankfull polygon, then follows the modern Nooksack centerline from the downstream end of that polygon to the mouth.
+    Transects are perpendicular to that centerline and stop at the valley walls.
+    Cyan on the profile is where the bankfull polygon crosses the transect.
+    Picking was restarted from cross-section 1 on 3 November 2026. Picks from the earlier self-crossing centerline were set aside and are not in this folder.
+    On 5 November 2026 the upstream 2023 lidar was placed behind this DEM. Existing 2022 elevations were kept. Empty cells were filled from nooksack_lidar2023_bathy2022_with_upstream.vrt. Transects were then clipped again where the ground stays 98 ft above the channel.

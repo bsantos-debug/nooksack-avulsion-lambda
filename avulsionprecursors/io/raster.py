@@ -6,6 +6,7 @@ only the horizontal coordinate system.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, Union
@@ -115,6 +116,16 @@ def mask_nodata(elev: np.ndarray, nodata) -> np.ndarray:
     return np.where(out == nd, np.nan, out)
 
 
+def _same_horizontal_crs(src_crs, dst_crs: CRS) -> bool:
+    """True when both CRS describe the same horizontal system."""
+    try:
+        left = CRS.from_user_input(src_crs).to_2d()
+        right = CRS.from_user_input(dst_crs).to_2d()
+    except Exception:
+        return False
+    return bool(left.equals(right))
+
+
 def write_reprojected_dem(
     src_path: Path,
     dst_path: Path,
@@ -141,6 +152,12 @@ def write_reprojected_dem(
             )
         if src.count < 1:
             raise InputValidationError(f"The DEM has no bands:\n  {src_path}")
+
+        if clip_geom is None and _same_horizontal_crs(working_src_crs, dst_crs):
+            src_resolved = Path(src_path).resolve()
+            if src_resolved != dst_path.resolve():
+                shutil.copy2(src_resolved, dst_path)
+            return describe_raster(dst_path)
 
         transform, width, height = calculate_default_transform(
             working_src_crs,

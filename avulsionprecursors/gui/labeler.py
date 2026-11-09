@@ -17,10 +17,12 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from rasterio.warp import transform_bounds
 from scipy.signal import savgol_filter
+from shapely.geometry import LineString, Point
 
 from .config import GUIConfig
 
 LEVEE_COLOR = "magenta"
+BANKFULL_COLOR = "cyan"
 
 
 def levee_profile_spans(
@@ -69,6 +71,90 @@ def levee_profile_spans(
     return groups
 
 
+def _line_pieces(geom: Any) -> List[Any]:
+    """LineString pieces of an intersection (points and polygons are ignored)."""
+    if geom is None or geom.is_empty:
+        return []
+    kind = geom.geom_type
+    if kind == "LineString":
+        return [geom]
+    if kind in ("MultiLineString", "GeometryCollection"):
+        pieces: List[Any] = []
+        for part in geom.geoms:
+            pieces.extend(_line_pieces(part))
+        return pieces
+    return []
+
+
+def channel_profile_spans(
+    profile: gpd.GeoDataFrame,
+    channel: gpd.GeoDataFrame,
+) -> List[Tuple[float, float]]:
+    """Along-track intervals where the transect lies inside the channel polygon.
+
+    Each interval is a bankfull (or other channel) intersection. The ends are
+    the polygon boundary crossings on that transect.
+    """
+    if profile is None or getattr(profile, "empty", True) or "geometry" not in profile:
+        return []
+    if "dist_along" not in profile.columns:
+        return []
+    if channel is None or getattr(channel, "empty", True):
+        return []
+    if profile.crs is None:
+        return []
+    try:
+        chan = channel.to_crs(profile.crs) if channel.crs is not None else channel
+    except Exception:
+        return []
+    geoms = [g for g in chan.geometry if g is not None and not g.is_empty]
+    if not geoms:
+        return []
+    try:
+        union = gpd.GeoSeries(geoms, crs=profile.crs).union_all()
+    except AttributeError:
+        union = gpd.GeoSeries(geoms, crs=profile.crs).unary_union
+    if union is None or union.is_empty:
+        return []
+
+    coords: List[Tuple[float, float]] = []
+    dist: List[float] = []
+    for geom, along in zip(profile.geometry, profile["dist_along"]):
+        if geom is None or geom.is_empty or not np.isfinite(along):
+            continue
+        coords.append((float(geom.x), float(geom.y)))
+        dist.append(float(along))
+    if len(coords) < 2:
+        return []
+
+    line = LineString(coords)
+    chain = np.zeros(len(coords), dtype=float)
+    for i in range(1, len(coords)):
+        chain[i] = chain[i - 1] + Point(coords[i]).distance(Point(coords[i - 1]))
+    along = np.asarray(dist, dtype=float)
+    spans: List[Tuple[float, float]] = []
+    for seg in _line_pieces(line.intersection(union)):
+        if seg.length <= 0:
+            continue
+        s0 = float(line.project(Point(seg.coords[0])))
+        s1 = float(line.project(Point(seg.coords[-1])))
+        lo_s, hi_s = (s0, s1) if s0 <= s1 else (s1, s0)
+        d0 = float(np.interp(lo_s, chain, along))
+        d1 = float(np.interp(hi_s, chain, along))
+        spans.append((min(d0, d1), max(d0, d1)))
+    if not spans:
+        return []
+    spans.sort()
+    merged: List[Tuple[float, float]] = [spans[0]]
+    for lo, hi in spans[1:]:
+        prev_lo, prev_hi = merged[-1]
+        if lo <= prev_hi:
+            merged[-1] = (prev_lo, max(prev_hi, hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
 def _iter_line_coords(geom: Any) -> List[Tuple[Any, Any]]:
     """Yield (x, y) arrays for line-like pieces of a shapely geometry."""
     if geom is None or geom.is_empty:
@@ -100,6 +186,7 @@ class CrossSectionLabeler:
         satellite_alpha: float = 0.7,
         node_id: Optional[int] = None,
         levee_gdf: Optional[gpd.GeoDataFrame] = None,
+        channel_gdf: Optional[gpd.GeoDataFrame] = None,
     ):
         self.config = config
         self.output_dir = output_dir
@@ -111,6 +198,7 @@ class CrossSectionLabeler:
         self.dem_alpha = dem_alpha
         self.satellite_alpha = satellite_alpha
         self.levee_gdf = levee_gdf
+        self.channel_gdf = channel_gdf
         self.current_label_idx = 0
         self.plotted_points: List[Any] = []
         self.labeled_points: Dict[str, List[Tuple[float, float]]] = {
@@ -334,6 +422,7 @@ class CrossSectionLabeler:
                 self._profile_z_smooth = z_s[valid][order]
 
         self._plot_levee_profile_marks(ax, df)
+        self._plot_channel_profile_marks(ax, df)
 
         ax.set_xlabel("Along Track Distance")
         ax.set_ylabel("Elevation")
@@ -345,17 +434,36 @@ class CrossSectionLabeler:
             pass
 
         if predicted_points:
+            # Prior-run picks: keep high zorder / strong markers so they stay
+            # visible on top of the dense raw+smoothed profile lines.
+            x_ref = df["dist_along"].to_numpy(dtype=float)
+            z_ref = df["elevation"].to_numpy(dtype=float)
+            order = np.argsort(x_ref)
+            x_sorted = x_ref[order]
+            z_sorted = z_ref[order]
+            labeled_prior = False
             for label, dist in predicted_points.items():
-                feature_name = label.split("_")[0]
-                y = np.interp(dist, df["dist_along"], df["elevation"])
-                ax.plot(
-                    dist,
-                    y,
-                    "X",
-                    markersize=10,
-                    color=self.config.colors.get(feature_name, "tab:red"),
-                    alpha=0.5,
+                feature_name = "".join(ch for ch in label if not ch.isdigit()) or label
+                color = self.config.colors.get(
+                    label, self.config.colors.get(feature_name, "tab:red")
                 )
+                y = float(np.interp(float(dist), x_sorted, z_sorted))
+                ax.plot(
+                    float(dist),
+                    y,
+                    marker="X",
+                    markersize=16,
+                    markeredgewidth=1.5,
+                    markeredgecolor="black",
+                    color=color,
+                    alpha=0.9,
+                    linestyle="none",
+                    zorder=20,
+                    label="prior picks (faded)" if not labeled_prior else None,
+                )
+                labeled_prior = True
+            if labeled_prior:
+                ax.legend(loc="best", fontsize=8)
 
     def plot_map(
         self,
@@ -429,6 +537,7 @@ class CrossSectionLabeler:
             )
 
         self._plot_levee_map(ax, extent_wgs84)
+        self._plot_channel_map(ax, extent_wgs84)
 
         elevation_values = df_plot["elevation"].values if "elevation" in df_plot.columns else None
         if elevation_values is not None:
@@ -448,7 +557,7 @@ class CrossSectionLabeler:
                     zorder=10,
                 )
                 if map_type == "dem":
-                    plt.colorbar(scatter, ax=ax, orientation="vertical", label="Elevation (m)", shrink=0.8)
+                    plt.colorbar(scatter, ax=ax, orientation="vertical", label="Elevation", shrink=0.8)
             else:
                 ax.scatter(
                     df_plot.geometry.x,
@@ -549,9 +658,13 @@ class CrossSectionLabeler:
             lon_coords = np.array(lon_flat).reshape(X.shape)
             lat_coords = np.array(lat_flat).reshape(Y.shape)
 
-            dem_data = np.ma.masked_invalid(dem_data)
+            dem_data = np.ma.filled(np.ma.masked_invalid(dem_data), np.nan)
+            dem_data = np.array(dem_data, dtype=float, copy=True)
 
             try:
+                finite = dem_data[np.isfinite(dem_data)]
+                if finite.size == 0:
+                    return
                 ax.pcolormesh(
                     lon_coords,
                     lat_coords,
@@ -560,8 +673,8 @@ class CrossSectionLabeler:
                     alpha=alpha,
                     transform=ccrs.PlateCarree(),
                     shading="auto",
-                    vmin=np.nanpercentile(dem_data, 2),
-                    vmax=np.nanpercentile(dem_data, 98),
+                    vmin=np.nanpercentile(finite, 2),
+                    vmax=np.nanpercentile(finite, 98),
                 )
             except Exception as e:
                 print(f"⚠️  Warning: Could not plot DEM: {e}")
@@ -592,6 +705,78 @@ class CrossSectionLabeler:
             )
             ax.axvline(mid, color=color, ls="--", lw=1.5, alpha=0.9, zorder=4)
             first = False
+
+    def _plot_channel_profile_marks(self, ax: plt.Axes, df: pd.DataFrame) -> None:
+        """Shade the transect interval inside the bankfull / channel polygon."""
+        if self.channel_gdf is None or not isinstance(df, gpd.GeoDataFrame):
+            return
+        spans = channel_profile_spans(df, self.channel_gdf)
+        if not spans:
+            return
+        color = BANKFULL_COLOR
+        first = True
+        for lo, hi in spans:
+            width = hi - lo
+            if width < 1.0:
+                ax.axvline(
+                    0.5 * (lo + hi),
+                    color=color,
+                    ls="-",
+                    lw=2.0,
+                    alpha=0.95,
+                    zorder=4,
+                    label="bankfull channel" if first else None,
+                )
+            else:
+                ax.axvspan(
+                    lo,
+                    hi,
+                    color=color,
+                    alpha=0.22,
+                    zorder=1,
+                    label="bankfull channel" if first else None,
+                )
+                ax.axvline(lo, color=color, ls="-", lw=1.6, alpha=0.95, zorder=4)
+                ax.axvline(hi, color=color, ls="-", lw=1.6, alpha=0.95, zorder=4)
+            first = False
+
+    def _plot_channel_map(self, ax: plt.Axes, extent_wgs84: List[float]) -> None:
+        """Draw the bankfull / channel polygon boundary on the map panel."""
+        if self.channel_gdf is None or self.channel_gdf.empty:
+            return
+        try:
+            chan = (
+                self.channel_gdf.to_crs(epsg=4326)
+                if self.channel_gdf.crs is not None
+                else self.channel_gdf
+            )
+        except Exception as e:
+            print(f"⚠️  Warning: Could not reproject channel overlay: {e}")
+            return
+        pad = 0.01
+        west, east, south, north = extent_wgs84
+        try:
+            from shapely.geometry import box
+
+            clip = box(west - pad, south - pad, east + pad, north + pad)
+            chan = chan[chan.intersects(clip)]
+        except Exception:
+            pass
+        if chan.empty:
+            return
+        drawn = False
+        for geom in chan.geometry:
+            for xs, ys in _iter_line_coords(geom):
+                ax.plot(
+                    xs,
+                    ys,
+                    color=BANKFULL_COLOR,
+                    lw=2.0,
+                    transform=ccrs.PlateCarree(),
+                    zorder=8,
+                    label="bankfull channel" if not drawn else None,
+                )
+                drawn = True
 
     def _plot_levee_map(self, ax: plt.Axes, extent_wgs84: List[float]) -> None:
         if self.levee_gdf is None or self.levee_gdf.empty:
@@ -668,8 +853,13 @@ class CrossSectionLabeler:
             else:
                 hint = "  (s = skip)"
             title = f"{prefix}  —  Pick {next_label}{hint}"
+        notes = []
+        if self.channel_gdf is not None:
+            notes.append("cyan = bankfull channel")
         if self.levee_gdf is not None:
-            title += "   |   magenta = mapped artificial levee"
+            notes.append("magenta = mapped artificial levee")
+        if notes:
+            title += "   |   " + "; ".join(notes)
         self.ax1.set_title(title, fontsize=14, fontweight="bold")
 
     def _skip_current_label(self) -> None:
@@ -729,6 +919,9 @@ class CrossSectionLabeler:
         - 'h': Show this help
 
         Profile panel shows raw DEM (gray) and Savitzky–Golay smooth (blue).
+        Cyan shading is the transect inside the bankfull polygon. The edges of
+        that shading are where the bankfull outline crosses the transect.
+        Outside the cyan interval is not the bankfull channel.
         Magenta bands/lines are mapped artificial levees — skip those crests as ridges.
         One ridge + its floodplain is enough; leave the other bank blank if needed.
         """

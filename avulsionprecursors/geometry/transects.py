@@ -167,13 +167,38 @@ def sample_thalweg_profile(
             (poly.contains(Point(xy)) for xy in coords),
             dtype=bool,
             count=len(coords),
+        ).reshape(s.size, n_off)
+        node_inside = np.fromiter(
+            (poly.contains(centerline.interpolate(float(si))) for si in s),
+            dtype=bool,
+            count=s.size,
         )
-        z_all = np.where(inside.reshape(s.size, n_off), z_all, np.nan)
+        # A polygon that covers only part of the river should not blank the
+        # thalweg on the uncovered reach.
+        z_all = mask_thalweg_outside_channel(z_all, inside, node_inside)
     with np.errstate(all="ignore"):
         filled = np.where(np.isfinite(z_all), z_all, np.inf)
         z = np.min(filled, axis=1)
         z = np.where(np.isfinite(z_all).any(axis=1), z, np.nan)
     return s, z
+
+
+def mask_thalweg_outside_channel(
+    z_all: np.ndarray,
+    sample_inside: np.ndarray,
+    node_inside: np.ndarray,
+) -> np.ndarray:
+    """Drop off-polygon samples only where the centerline point is inside it.
+
+    Reaches outside the polygon keep the full search strip, so a bankfull
+    extent that ends before the mouth does not erase the lower-river thalweg.
+    """
+    z = np.array(z_all, dtype=float, copy=True)
+    inside = np.asarray(sample_inside, dtype=bool)
+    node = np.asarray(node_inside, dtype=bool)
+    if z.ndim != 2 or inside.shape != z.shape or node.shape != (z.shape[0],):
+        raise ValueError("Thalweg mask shapes do not match the elevation strip.")
+    return np.where(node[:, None] & ~inside, np.nan, z)
 
 
 def thalweg_signed_slopes_at_points(
@@ -402,6 +427,7 @@ def perpendicular_azimuths(
     river: LineString,
     river_azimuth: LineString,
     tangent_half_delta: float,
+    include_neighbors: bool = True,
 ) -> list:
     """Perpendicular (transect) azimuth at each node."""
     n_pts = len(points)
@@ -428,12 +454,12 @@ def perpendicular_azimuths(
 
     for i in range(n_pts):
         k = int(pos_of[i])
-        neighbor_idxs: list[int] = []
-        if k > 0:
-            neighbor_idxs.append(int(order[k - 1]))
-        neighbor_idxs.append(i)
-        if k < n_pts - 1:
-            neighbor_idxs.append(int(order[k + 1]))
+        neighbor_idxs: list[int] = [i]
+        if include_neighbors:
+            if k > 0:
+                neighbor_idxs.append(int(order[k - 1]))
+            if k < n_pts - 1:
+                neighbor_idxs.append(int(order[k + 1]))
 
         tangents: list[float] = []
         for j in neighbor_idxs:

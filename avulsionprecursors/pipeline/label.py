@@ -8,6 +8,7 @@ from typing import Optional, Sequence
 from avulsionprecursors.config import WorkflowConfig
 from avulsionprecursors.exceptions import InputValidationError
 from avulsionprecursors.gui.config import GUIConfig
+from avulsionprecursors.pipeline.label_note import write_label_readme
 from avulsionprecursors.pipeline.labeling import FileLabelingPipeline
 
 
@@ -39,6 +40,8 @@ def run_labeler(
     if not dem_path.exists():
         dem_path = cfg.paths.dem if Path(cfg.paths.dem).exists() else None
 
+    note_path = write_label_readme(cfg)
+    print(f"Run note: {note_path}")
     skip = cfg.labeler.skip_existing if skip_existing is None else skip_existing
     show_old = cfg.labeler.overlay_existing if overlay_existing is None else overlay_existing
     gui = GUIConfig()
@@ -56,5 +59,6 @@ def run_labeler(
         overlay_path=cfg.paths.levee,
         overlay_existing_picks=show_old,
         levee_buffer_m=float(cfg.labeler.levee_buffer),
+        channel_overlay_path=cfg.paths.channel_polygon,
     )
     pipeline.run(node_ids=node_ids, skip_existing=skip)
