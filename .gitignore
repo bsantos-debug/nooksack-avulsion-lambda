@@ -57,6 +57,8 @@ archive/working_snapshot/
 # Keep versioned 2022 topobathy pick archives / figures in studies/
 !studies/
 !studies/**
+studies/**/__pycache__/
+studies/**/*.py[cod]
 studies/**/*.tif
 studies/**/*.tiff
 studies/**/*.vrt
