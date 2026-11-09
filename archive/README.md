@@ -23,3 +23,13 @@ python -m avulsionprecursors lambda  -c config/example.yaml
 
 Nooksack-only lidar comparison scripts also live in `local/` on this machine
 (gitignored; not for the public repository).
+
+## 2022 lidar + bathy labeler (interactive)
+
+Versioned pick archives and GUI instructions:
+`studies/nooksack_2022_topobathy/`.
+
+Configs:
+
+- `config/nooksack_labeler_with_levee.yaml` — original labels dir (`data/labels`)
+- `config/nooksack_labeler_no_levee.yaml` — parallel no-levee pass (`data/labels_no_levee`)
