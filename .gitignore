@@ -53,3 +53,12 @@ examples/synthetic_valley/outputs/
 
 # Local recovery copies (contain machine-specific paths; git snapshot is 2f2764c)
 archive/working_snapshot/
+
+# Keep versioned 2022 topobathy pick archives / figures in studies/
+!studies/
+!studies/**
+studies/**/*.tif
+studies/**/*.tiff
+studies/**/*.vrt
+studies/**/*.laz
+studies/**/*.las

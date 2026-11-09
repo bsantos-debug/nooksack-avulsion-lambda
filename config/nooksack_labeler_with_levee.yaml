@@ -1,0 +1,47 @@
+# Original / with-levee Nooksack labeler config (v1).
+# Paths match the local working-tree convention (gitignored data/).
+# Edit dem / centerline / levee for your machine before running.
+#
+#   python -m avulsionprecursors label -c config/nooksack_labeler_with_levee.yaml
+#
+# Labels → data/labels/Nooksack_node_<id>_labels.csv
+
+study_name: Nooksack
+
+crs:
+  target: EPSG:26910
+
+units:
+  vertical: ft   # 2024 topobathy is NAVD88 feet; not converted
+
+paths:
+  # Background DEM in the GUI (2024 topobathy used for the 2022 comparison workflow).
+  # Replace with your local path if different:
+  dem: ../data/Topobathy_reprojected.tif
+  centerline: ../data/centerline.shp
+  channel_polygon: null
+  centerline_points: null
+  clip_boundary: null
+  levee: null   # set to mapped artificial levees shapefile/geojson if available
+  # Extract products from the existing Nooksack run (repo-root / data conventions):
+  output_dir: ../data
+
+extract:
+  spacing: 200
+  cross_half_length: 800
+  max_half_length: 4000
+  valley_wall_dz: 30
+  valley_wall_persist: 50
+  valley_wall_skip_channel: 200
+  max_elev_above_channel: 40
+
+lambda_calc:
+  labels_dir: ../data/labels
+  auto_minmax: false
+
+labeler:
+  show_satellite: true
+  show_dem: true
+  skip_existing: true
+  overlay_existing: true
+  levee_buffer: 25
